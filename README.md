@@ -39,6 +39,8 @@ qpipeline = "0.1.0"
 
 ---
 
+```
+
 Basic Pipeline Setup
 
 ```rust
@@ -61,6 +63,8 @@ fn main() {
 
 ---
 
+```
+
 Batch & Parallel Processing
 
 For handling large datasets, qpipeline offers both sequential and multi-threaded scope execution:
@@ -79,6 +83,8 @@ fn main() {
 }
 
 ---
+
+```
 
 Custom Stages
 
