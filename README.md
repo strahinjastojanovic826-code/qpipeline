@@ -69,9 +69,9 @@ Batch & Parallel Processing
 
 For handling large datasets, qpipeline offers both sequential and multi-threaded scope execution:
 
+```rust
 use qpipeline::{QuatPipeline, QuatChunk, QuatInvertStage};
 
-```rust
 fn main() {
     let pipeline = QuatPipeline::new().add_stage(QuatInvertStage);
 
