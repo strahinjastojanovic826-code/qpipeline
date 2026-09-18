@@ -37,8 +37,6 @@ Add `qpipeline` to your project's `Cargo.toml`:
 [dependencies]
 qpipeline = "0.1.0"
 
----
-
 ```
 
 Basic Pipeline Setup
@@ -61,8 +59,6 @@ fn main() {
     println!("Resulting raw chunk: 0x{:X}", result.0);
 }
 
----
-
 ```
 
 Batch & Parallel Processing
@@ -81,8 +77,6 @@ fn main() {
     // Parallel processing across 8 OS native threads (No external crates required)
     pipeline.execute_batch_parallel(&mut batch, 8);
 }
-
----
 
 ```
 
@@ -103,5 +97,3 @@ impl QuatStage for CustomMaskStage {
         QuatChunk(chunk.0 & self.pattern)
     }
 }
-
----
