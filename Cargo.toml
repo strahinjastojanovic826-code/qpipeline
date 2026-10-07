@@ -1,14 +1,22 @@
 [package]
 name = "qpipeline"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 authors = ["Strale <strahinjastojanovic826@gmail.com>"]
 description = "High-performance 4-state (2-bit quat) processing pipeline engine"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
-repository = "https://github.com/tvoj-username/qpipeline"
+repository = "https://github.com/strahinjastojanovic826-code/qpipeline"
 keywords = ["quat", "pipeline", "bit-packing", "no-deps", "parallel"]
 categories = ["data-structures", "concurrency"]
 
+[lib]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
