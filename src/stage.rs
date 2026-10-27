@@ -104,3 +104,38 @@ impl QuatStage for QuatInspectStage {
         Ok(chunk)
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct QuatLookupStage {
+    table: [QuatState; 4],
+}
+
+impl QuatLookupStage {
+    #[inline(always)]
+    pub const fn new(table: [QuatState; 4]) -> Self {
+        Self { table }
+    }
+}
+
+impl QuatStage for QuatLookupStage {
+    #[inline(always)]
+    fn process(&self, chunk: QuatChunk) -> Result<QuatChunk, PipelineError> {
+        let raw = chunk.raw();
+        let mut new_raw: u64 = 0;
+
+        for i in 0..32 {
+            let shift = i * 2;
+            let val_bits = ((raw >> shift) & 0b11) as u8;
+            let state = match val_bits {
+                0 => QuatState::Q0,
+                1 => QuatState::Q1,
+                2 => QuatState::Q2,
+                _ => QuatState::Q3,
+            };
+            let mapped = self.table[state as usize] as u64;
+            new_raw |= mapped << shift;
+        }
+
+        Ok(QuatChunk(new_raw))
+    }
+}

@@ -20,17 +20,17 @@ pub extern "C" fn qpipeline_create() -> *mut QuatPipeline {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn qpipeline_free(ptr: *mut QuatPipeline) {
+pub unsafe extern "C" fn qpipeline_free(ptr: *mut QuatPipeline) { unsafe {
     if ptr.is_null() {
         return;
     }
     let _ = catch_unwind(AssertUnwindSafe(|| {
         drop(Box::from_raw(ptr));
     }));
-}
+}}
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn qpipeline_add_invert_stage(ptr: *mut QuatPipeline) -> QuatFFIStatus {
+pub unsafe extern "C" fn qpipeline_add_invert_stage(ptr: *mut QuatPipeline) -> QuatFFIStatus { unsafe {
     if ptr.is_null() {
         return QuatFFIStatus::NullPointer;
     }
@@ -44,13 +44,13 @@ pub unsafe extern "C" fn qpipeline_add_invert_stage(ptr: *mut QuatPipeline) -> Q
         Ok(_) => QuatFFIStatus::Ok,
         Err(_) => QuatFFIStatus::PanicOccurred,
     }
-}
+}}
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn qpipeline_add_xor_stage(
     ptr: *mut QuatPipeline,
     mask: u64,
-) -> QuatFFIStatus {
+) -> QuatFFIStatus { unsafe {
     if ptr.is_null() {
         return QuatFFIStatus::NullPointer;
     }
@@ -64,14 +64,14 @@ pub unsafe extern "C" fn qpipeline_add_xor_stage(
         Ok(_) => QuatFFIStatus::Ok,
         Err(_) => QuatFFIStatus::PanicOccurred,
     }
-}
+}}
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn qpipeline_execute_smart(
     ptr: *const QuatPipeline,
     chunks_ptr: *mut u64,
     len: usize,
-) -> QuatFFIStatus {
+) -> QuatFFIStatus { unsafe {
     if ptr.is_null() || chunks_ptr.is_null() {
         return QuatFFIStatus::NullPointer;
     }
@@ -91,4 +91,4 @@ pub unsafe extern "C" fn qpipeline_execute_smart(
         Ok(Err(_)) => QuatFFIStatus::ExecutionError,
         Err(_) => QuatFFIStatus::PanicOccurred,
     }
-}
+}}

@@ -11,6 +11,10 @@
 - **Smart Parallel Processing**: Automatically scales workload across multiple CPU threads using `std::thread::scope` without runtime allocation overhead.
 - **FFI Bindings for C, C++, and C#**: Safe, C-compatible binary interface with full panic boundaries (`catch_unwind`) to prevent crashes across foreign ABI boundaries.
 - **Zero-Copy Architecture**: Process memory in-place directly over raw pointers or native slices.
+- **Extended Quaternary Arithmetic**: Built-in support for modular arithmetic (addition and subtraction modulo 4) directly on quaternary states (`QuatState`).
+- **SIMD / Extended Vectorization (`QuatDoubleChunk`)**: High-performance 128-bit blocks capable of processing 64 quaternary states within a single CPU word.
+- **Serde Serialization Support**: Optional features for serializing and deserializing chunks and states for easy data persistence and networking.
+- **Advanced Lookup Table (LUT) Stages**: Flexible custom transformation stages (`QuatLookupStage`) using user-defined mapping matrices.
 
 ---
 
@@ -68,6 +72,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     pipeline.execute_smart(&mut chunks)?;
 
     println!("Processed {} chunks successfully!", chunks.len());
+    Ok(())
+}
+```
+
+### Advanced Example (Lookup Table Stage)
+
+```rust
+use qpipeline::builder::QuatPipeline;
+use qpipeline::chunk::{QuatChunk, QuatState};
+use qpipeline::stage::QuatLookupStage;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // 1. Kreiranje cevovoda sa prilagođenom Lookup Table fazom
+    let mut pipeline = QuatPipeline::new();
+    
+    let lookup_stage = QuatLookupStage::new([
+        QuatState::Q3,
+        QuatState::Q2,
+        QuatState::Q1,
+        QuatState::Q0,
+    ]);
+    pipeline.push_stage(lookup_stage);
+
+    // 2. Priprema podataka
+    let mut chunks = vec![QuatChunk::new(0)];
+
+    // 3. Izvršavanje
+    pipeline.execute_smart(&mut chunks)?;
+    println!("Napredna obrada uspešno završena!");
     Ok(())
 }
 ```
@@ -226,6 +259,6 @@ This project is dual-licensed under:
 ### Commercial License
 If you wish to use `qpipeline` in closed-source software, proprietary products, or environments where AGPL-3.0 compliance is not feasible (e.g., embedding DLLs/shared libraries without disclosing host source code), a commercial license is required.
 
-For commercial licensing inquiries, please contact: `your.email@domain.com`
+For commercial licensing inquiries, please contact: `strahinjastojanovic826@gmail.com`
 
 ---

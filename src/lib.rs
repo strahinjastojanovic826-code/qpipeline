@@ -262,4 +262,39 @@ fn test_4_stress_branchless_replacement_throughput() {
 
         assert_eq!(result.raw(), (!0b1111u64) ^ 0b1010);
     }
+    #[test]
+fn test_quat_arithmetic() {
+    // Sabiranje po modulu 4
+    assert_eq!(QuatState::Q1.add(QuatState::Q2), QuatState::Q3);
+    assert_eq!(QuatState::Q3.add(QuatState::Q1), QuatState::Q0); // Prelivanje (overflow) na Q0
+    
+    // Oduzimanje po modulu 4
+    assert_eq!(QuatState::Q3.sub(QuatState::Q1), QuatState::Q2);
+    assert_eq!(QuatState::Q0.sub(QuatState::Q1), QuatState::Q3); // Podlivanje (underflow) na Q3
+}
+#[test]
+fn test_quat_double_chunk_invert() {
+    let chunk = QuatDoubleChunk::new(0);
+    let inverted = chunk.invert();
+    assert_eq!(inverted.raw(), !0u128);
+}
+
+#[test]
+fn test_quat_lookup_stage() {
+    // Invertuje svako stanje: Q0->Q3, Q1->Q2, Q2->Q1, Q3->Q0
+    let stage = QuatLookupStage::new([
+        QuatState::Q3,
+        QuatState::Q2,
+        QuatState::Q1,
+        QuatState::Q0,
+    ]);
+
+    let chunk = QuatChunk::new(0); // Sva stanja su Q0 (0b00)
+    let processed = stage.process(chunk).unwrap();
+
+    // Proveravamo da li je Q0 prešao u Q3 (0b11 za svaki par bitova -> svi bitovi 1)
+    let expected_val: u64 = !0u64; // Ili 0xFFFFFFFFFFFFFFFF
+    assert_eq!(processed.raw(), expected_val);
+}
+
 }

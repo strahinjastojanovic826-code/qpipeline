@@ -1,6 +1,7 @@
 use crate::error::PipelineError;
 
 /// Predstavlja jedno kvartarno stanje (2 bita = 4 stanja: Q0, Q1, Q2, Q3).
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum QuatState {
@@ -9,6 +10,10 @@ pub enum QuatState {
     Q2 = 0b10,
     Q3 = 0b11,
 }
+
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub struct QuatChunk(pub u64);
 
 impl From<u8> for QuatState {
     #[inline(always)]
@@ -22,9 +27,31 @@ impl From<u8> for QuatState {
     }
 }
 
-/// 64-bitni blok koji skladišti 32 kvartarna stanja (svako po 2 bita).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
-pub struct QuatChunk(pub u64);
+impl QuatState {
+    /// Modular addition of two quaternary states (mod 4).
+    #[inline(always)]
+    pub const fn add(self, other: Self) -> Self {
+        let res = ((self as u8) + (other as u8)) & 0b11;
+        match res {
+            0 => QuatState::Q0,
+            1 => QuatState::Q1,
+            2 => QuatState::Q2,
+            _ => QuatState::Q3,
+        }
+    }
+
+    /// Modular subtraction of two quaternary states (mod 4).
+    #[inline(always)]
+    pub const fn sub(self, other: Self) -> Self {
+        let res = (((self as u8) + 4) - (other as u8)) & 0b11;
+        match res {
+            0 => QuatState::Q0,
+            1 => QuatState::Q1,
+            2 => QuatState::Q2,
+            _ => QuatState::Q3,
+        }
+    }
+}
 
 impl QuatChunk {
     #[inline(always)]
@@ -144,5 +171,26 @@ impl IntoIterator for QuatChunk {
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
         QuatChunkIter { chunk: self, index: 0 }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub struct QuatDoubleChunk(pub u128);
+
+impl QuatDoubleChunk {
+    #[inline(always)]
+    pub const fn new(raw: u128) -> Self {
+        Self(raw)
+    }
+
+    /// Inverts all states inside the 128-bit block using a single CPU instruction.
+    #[inline(always)]
+    pub fn invert(self) -> Self {
+        Self(!self.0)
+    }
+
+    #[inline(always)]
+    pub const fn raw(&self) -> u128 {
+        self.0
     }
 }
