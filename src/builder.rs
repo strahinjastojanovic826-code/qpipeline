@@ -22,6 +22,17 @@ impl QuatPipeline {
         self
     }
 
+    pub fn execute_simd(&self, chunks: &mut [QuatChunk]) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        crate::simd::SimdEngine::invert_avx2(chunks);
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        crate::simd::SimdEngine::invert_portable(chunks);
+    }
+}
+
     /// Dodaje novu fazu putem referenci (ako se pipeline ne konzumira).
     pub fn push_stage<S: QuatStage + 'static>(&mut self, stage: S) {
         self.stages.push(Arc::new(stage));

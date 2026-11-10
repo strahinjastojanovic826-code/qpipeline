@@ -1,6 +1,6 @@
 [package]
 name = "qpipeline"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2024"
 authors = ["Strale <strahinjastojanovic826@gmail.com>"]
 description = "High-performance 4-state (2-bit quat) processing pipeline engine"
