@@ -1,3 +1,27 @@
+//! # Foreign Function Interface (FFI) Safety & Invariants
+//!
+//! This module exposes a C-compatible (`extern "C"`) interface for managing and executing
+//! a [`QuatPipeline`] from external callers (such as C, C++, or C# via P/Invoke).
+//!
+//! ## `unsafe` & ABI Invariants
+//! - **Pointer Validity & Alignment**: Any non-null `ptr: *mut QuatPipeline` or `ptr: *const QuatPipeline`
+//!   passed to these functions must point to a valid, properly aligned, and initialized
+//!   `QuatPipeline` instance originally allocated via [`qpipeline_create`] (`Box::into_raw`).
+//! - **Ownership & Aliasing**:
+//!   - [`qpipeline_free`] transfers ownership back via `Box::from_raw` and drops the pipeline.
+//!     It must be called at most once per handle, and the handle must never be used afterward.
+//!   - [`qpipeline_add_invert_stage`] and [`qpipeline_add_xor_stage`] mutably borrow the underlying
+//!     `QuatPipeline` (`&mut *ptr`) and must not be called concurrently with other operations on the
+//!     same pipeline instance.
+//! - **Raw Slice Construction (`qpipeline_execute_smart`)**:
+//!   - When `len > 0`, `chunks_ptr` must be non-null, properly aligned for `QuatChunk` (`u64`),
+//!     and point to at least `len` initialized elements that remain valid and unaliased for the
+//!     duration of the call.
+//!   - Casting `*mut u64` to `*mut QuatChunk` relies on `QuatChunk` having a compatible single-field
+//!     layout; ensure `QuatChunk` uses `#[repr(transparent)]` for strict ABI guarantees.
+//! - **Panic Boundaries**: Functions wrap operations in `catch_unwind` to prevent unwinding across the
+//!   FFI boundary and map panics to [`QuatFFIStatus::PanicOccurred`].
+
 use crate::builder::QuatPipeline;
 use crate::chunk::QuatChunk;
 use crate::stage::{QuatInvertStage, QuatXorMaskStage};

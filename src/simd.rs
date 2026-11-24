@@ -19,6 +19,15 @@ impl SimdEngine {
 
         // Process 4 chunks (256 bits = 128 quaternary states) simultaneously
         #[cfg(target_feature = "avx2")]
+        // SAFETY:
+        // - `i + 4 <= len` guarantees at least 4 initialized `QuatChunk` elements (4 * 64 bits = 256 bits)
+        //   starting at `chunks[i..].as_mut_ptr()`, with valid mutable provenance and non-overlapping access.
+        // - Casting `*mut QuatChunk` to `*mut __m256i` is valid under the assumption `QuatChunk` has a single
+        //   `u64` layout (`#[repr(transparent)]`) and we use unaligned load/store (`_mm256_loadu_si256` /
+        //   `_mm256_storeu_si256`), so 32-byte alignment of `ptr` is not required.
+        // - Bitwise XOR with `_mm256_set1_epi64x(-1)` (all `1` bits) performs a 256-bit bitwise NOT,
+        //   inverting all 128 packed 2-bit quaternary states (`00 <-> 11`, `01 <-> 10`) in one vector op.
+        // - Caller/dispatch must ensure AVX2 is supported on the target CPU before executing these intrinsics.
         unsafe {
             while i + 4 <= len {
                 let ptr = chunks[i..].as_mut_ptr() as *mut __m256i;

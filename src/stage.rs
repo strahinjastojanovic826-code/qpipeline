@@ -5,6 +5,14 @@ use std::sync::Arc;
 
 pub trait QuatStage: Send + Sync {
     fn process(&self, chunk: QuatChunk) -> Result<QuatChunk, PipelineError>;
+
+    /// Batch execution hook; stages can override this for faster slice processing
+    fn process_batch(&self, chunks: &mut [QuatChunk]) -> Result<(), PipelineError> {
+        for chunk in chunks.iter_mut() {
+            *chunk = self.process(*chunk)?;
+        }
+        Ok(())
+    }
 }
 
 /// Statički cjevovod sa 0-cost compile-time spajanjem.
@@ -47,6 +55,20 @@ impl QuatStage for QuatInvertStage {
     fn process(&self, chunk: QuatChunk) -> Result<QuatChunk, PipelineError> {
         Ok(chunk.invert())
     }
+
+    #[inline]
+    fn process_batch(&self, chunks: &mut [QuatChunk]) -> Result<(), PipelineError> {
+        #[cfg(target_arch = "x86_64")]
+        {
+            if is_x86_feature_detected!("avx2") {
+                crate::simd::SimdEngine::invert_avx2(chunks);
+                return Ok(());
+            }
+        }
+        crate::simd::SimdEngine::invert_portable(chunks);
+        Ok(())
+    }
+
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -71,6 +93,15 @@ impl QuatStage for QuatXorMaskStage {
     fn process(&self, chunk: QuatChunk) -> Result<QuatChunk, PipelineError> {
         Ok(QuatChunk(chunk.0 ^ self.mask))
     }
+
+    #[inline]
+    fn process_batch(&self, chunks: &mut [QuatChunk]) -> Result<(), PipelineError> {
+        for chunk in chunks.iter_mut() {
+            chunk.0 ^= self.mask;
+        }
+        Ok(())
+    }
+
 }
 
 #[derive(Debug, Clone)]
@@ -107,35 +138,53 @@ impl QuatStage for QuatInspectStage {
 
 #[derive(Debug, Clone)]
 pub struct QuatLookupStage {
-    table: [QuatState; 4],
+    pub table: [QuatState; 4],
+    byte_lut: [u8; 256],
 }
 
 impl QuatLookupStage {
-    #[inline(always)]
     pub const fn new(table: [QuatState; 4]) -> Self {
-        Self { table }
+        let mut byte_lut = [0u8; 256];
+        let mut b: usize = 0;
+        while b < 256 {
+            let s0 = table[b & 0b11] as u8;
+            let s1 = table[(b >> 2) & 0b11] as u8;
+            let s2 = table[(b >> 4) & 0b11] as u8;
+            let s3 = table[(b >> 6) & 0b11] as u8;
+            byte_lut[b] = s0 | (s1 << 2) | (s2 << 4) | (s3 << 6);
+            b += 1;
+        }
+        Self { table, byte_lut }
+    }
+
+    #[inline(always)]
+    fn map_raw(&self, raw: u64) -> u64 {
+        let bytes = raw.to_ne_bytes();
+        let mapped_bytes = [
+            self.byte_lut[bytes[0] as usize],
+            self.byte_lut[bytes[1] as usize],
+            self.byte_lut[bytes[2] as usize],
+            self.byte_lut[bytes[3] as usize],
+            self.byte_lut[bytes[4] as usize],
+            self.byte_lut[bytes[5] as usize],
+            self.byte_lut[bytes[6] as usize],
+            self.byte_lut[bytes[7] as usize],
+        ];
+        u64::from_ne_bytes(mapped_bytes)
     }
 }
 
 impl QuatStage for QuatLookupStage {
     #[inline(always)]
     fn process(&self, chunk: QuatChunk) -> Result<QuatChunk, PipelineError> {
-        let raw = chunk.raw();
-        let mut new_raw: u64 = 0;
+        Ok(QuatChunk(self.map_raw(chunk.raw())))
+    }
 
-        for i in 0..32 {
-            let shift = i * 2;
-            let val_bits = ((raw >> shift) & 0b11) as u8;
-            let state = match val_bits {
-                0 => QuatState::Q0,
-                1 => QuatState::Q1,
-                2 => QuatState::Q2,
-                _ => QuatState::Q3,
-            };
-            let mapped = self.table[state as usize] as u64;
-            new_raw |= mapped << shift;
+    #[inline]
+    fn process_batch(&self, chunks: &mut [QuatChunk]) -> Result<(), PipelineError> {
+        for chunk in chunks.iter_mut() {
+            chunk.0 = self.map_raw(chunk.0);
         }
-
-        Ok(QuatChunk(new_raw))
+        Ok(())
     }
 }

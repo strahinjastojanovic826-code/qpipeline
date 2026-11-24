@@ -3,6 +3,7 @@ use crate::error::PipelineError;
 use crate::stage::QuatStage;
 use std::sync::Arc;
 use std::thread;
+use crate::QuatBlock;
 
 /// Glavni dinamički cjevovod za obradu kvartarnih blokova.
 #[derive(Default)]
@@ -115,5 +116,126 @@ impl QuatPipeline {
         iter: impl Iterator<Item = QuatChunk> + 'a,
     ) -> impl Iterator<Item = Result<QuatChunk, PipelineError>> + 'a {
         iter.map(move |chunk| self.execute_chunk(chunk))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PipelineTelemetry {
+    pub processed_chunks: usize,
+    pub threads_used: usize,
+    pub elapsed_nanos: u128,
+}
+
+pub trait GenericStage<B: QuatBlock>: Send + Sync {
+    fn process(&self, block: B) -> Result<B, PipelineError>;
+}
+
+pub struct GenericQuatPipeline<B: QuatBlock> {
+    stages: Vec<Arc<dyn GenericStage<B>>>,
+}
+
+impl<B: QuatBlock> Default for GenericQuatPipeline<B> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<B: QuatBlock> GenericQuatPipeline<B> {
+    pub fn new() -> Self {
+        Self { stages: Vec::new() }
+    }
+
+    pub fn add_stage<S: GenericStage<B> + 'static>(mut self, stage: S) -> Self {
+        self.stages.push(Arc::new(stage));
+        self
+    }
+
+    pub fn execute_block(&self, mut block: B) -> Result<B, PipelineError> {
+        for stage in &self.stages {
+            block = stage.process(block)?;
+        }
+        Ok(block)
+    }
+
+    pub fn execute_slice(&self, blocks: &mut [B]) -> Result<(), PipelineError> {
+        for block in blocks.iter_mut() {
+            *block = self.execute_block(*block)?;
+        }
+        Ok(())
+    }
+}
+
+impl QuatPipeline {
+    /// Executes with telemetry and converts worker thread panics into PipelineError
+    pub fn execute_smart_with_telemetry(
+        &self,
+        chunks: &mut [QuatChunk],
+        min_chunks_per_thread: usize,
+    ) -> Result<PipelineTelemetry, PipelineError> {
+        let start = std::time::Instant::now();
+        let min_per_thread = min_chunks_per_thread.max(1);
+
+        let available_threads: usize = thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
+
+        let threads_used = if chunks.len() < min_per_thread || available_threads <= 1 {
+            self.execute_batch(chunks)?;
+            1
+        } else {
+            let optimal_threads = (chunks.len() / min_per_thread)
+                .min(available_threads)
+                .max(1);
+
+            if optimal_threads <= 1 || chunks.is_empty() {
+                self.execute_batch(chunks)?;
+                1
+            } else {
+                let chunk_size = (chunks.len() + optimal_threads - 1) / optimal_threads;
+                let mut thread_err: Option<PipelineError> = None;
+
+                thread::scope(|s| {
+                    let mut handles = Vec::with_capacity(optimal_threads);
+                    for chunk_slice in chunks.chunks_mut(chunk_size) {
+                        let handle = s.spawn(move || -> Result<(), PipelineError> {
+                            for chunk in chunk_slice.iter_mut() {
+                                *chunk = self.execute_chunk(*chunk)?;
+                            }
+                            Ok(())
+                        });
+                        handles.push(handle);
+                    }
+
+                    for handle in handles {
+                        match handle.join() {
+                            Ok(Ok(())) => {}
+                            Ok(Err(e)) => {
+                                if thread_err.is_none() {
+                                    thread_err = Some(e);
+                                }
+                            }
+                            Err(_) => {
+                                if thread_err.is_none() {
+                                    thread_err = Some(PipelineError::Custom(
+                                        "Worker thread panicked during pipeline execution".to_string(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                });
+
+                if let Some(err) = thread_err {
+                    return Err(err);
+                }
+                optimal_threads
+            }
+        };
+
+        Ok(PipelineTelemetry {
+            processed_chunks: chunks.len(),
+            threads_used,
+            elapsed_nanos: start.elapsed().as_nanos(),
+        })
     }
 }

@@ -18,6 +18,10 @@
 - **Extended Quaternary Logic**: Built-in support for advanced Łukasiewicz logical operators (`min`, `max`, `negate`).
 - **Quaternary Matrices & Truth Tables**: 2D quaternary matrices with transpose support and arbitrary 4x4 truth table evaluators.
 - **Lazy Stream Processing**: Iterator-based streaming transformations without allocating intermediate vectors.
+- **Batch Stage Execution (`process_batch`)**: Overridable batch hooks on stages for faster slice and vectorised processing.
+- **Generic Block Pipeline (`QuatBlock` & `GenericQuatPipeline`)**: Generic block abstraction supporting both `QuatChunk` and `QuatDoubleChunk` without duplicating pipeline logic.
+- **Matrix Algebra Operations (`QuatMatrix`)**: Quaternary matrix multiplication using `(max, min)` semiring and modular (`mod 4`) arithmetic with dimension validation.
+- **Execution Telemetry & Panic Safety**: Execution timing and thread metrics (`PipelineTelemetry`) with safe worker thread error/panic propagation.
 
 ---
 
@@ -35,31 +39,35 @@
 
 ## Benchmark
 
-| Category | Test / Operation Name | Execution Time | Description |
-| :--- | :--- | :--- | :--- |
-| **Micro-operations** | `test_quat_double_chunk_invert` | 100ns[cite: 27, 28] | Inversion of a 128-bit double chunk |
-| **Micro-operations** | `test_quat_arithmetic` | 200ns[cite: 27, 28] | Modulo 4 quaternary arithmetic operations |
-| **Micro-operations** | `test_quat_chunk_count_and_invert` | 200ns[cite: 27, 28] | State counting and inversion via SWAR optimization |
-| **Micro-operations** | `test_quat_lookup_stage` | 700ns[cite: 27, 28] | State lookup transformation stage |
-| **Micro-operations** | `test_quat_chunk_get_set_state` | 800ns[cite: 27, 28] | Index-based state get/set with bounds checking |
-| **Pipelines & FFI** | `test_pipeline_sequential_execution` | 1.3µs[cite: 27, 28] | Sequential execution through multiple pipeline stages |
-| **Pipelines & FFI** | `test_10_static_pipeline_zero_cost_fusion` | 1.5µs[cite: 27] | Compile-time 0-cost pipeline fusion (static dispatch) |
-| **Pipelines & FFI** | `test_ffi_null_pointer_safety` | 2.8µs[cite: 27] | FFI null pointer safety check and error handling |
-| **Pipelines & FFI** | `test_6_boundary_empty_slice` | 6.5µs[cite: 27] | Boundary test for empty slice handling |
-| **Pipelines & FFI** | `test_ffi_lifecycle_and_execution` | 12.1µs[cite: 27] | FFI create, add stages, execute, and free lifecycle |
-| **SIMD & Logic** | SIMD / Portable invert over 10,000 chunks | 66.2µs[cite: 27, 28] | Batch vectorization/inversion over 10,000 chunks |
-| **SIMD & Logic** | Matrix 100x100 allocation, set and transpose | 514.9µs[cite: 27, 28] | Quaternary matrix operations (10,000 elements) |
-| **SIMD & Logic** | 1,000,000 truth table evaluations | 5.9309ms[cite: 27, 28] | Evaluation of 4x4 truth tables over 1M iterations |
-| **SIMD & Logic** | 1,000,000 logic operations | 13.9888ms[cite: 27, 28] | Łukasiewicz min/max/negate operations (1M iterations) |
-| **Stress & Parallel** | `test_5_boundary_single_element_parallel_fallback` | 4.5717ms[cite: 27] | Parallel execution fallback on a single element |
-| **Stress & Parallel** | `test_pipeline_parallel_smart_execution` | 6.2949ms[cite: 27, 28] | Smart parallel/sequential selection over 10,000 chunks |
-| **Stress & Parallel** | `test_3_stress_deep_pipeline_chaining` | 9.5449ms[cite: 27] | Deep pipeline chaining with 100 stages |
-| **Stress & Parallel** | `test_8_stress_ffi_rapid_creation_destruction` | 9.9757ms[cite: 27, 28] | Rapid creation and destruction of 10,000 FFI pipelines |
-| **Stress & Parallel** | `test_2_stress_thread_race_inspect_stage` | 11.1178ms[cite: 27, 28] | Multithreaded race condition stress test with atomic counter |
-| **Stress & Parallel** | `test_9_stress_ffi_huge_array_pass` | 15.1078ms[cite: 27, 28] | Passing 2 million raw elements across FFI boundary |
-| **Stress & Parallel** | `test_7_stress_lazy_stream_processing` | 92.9152ms[cite: 27, 28] | Lazy stream processing via iterator for 1 million items |
-| **Stress & Parallel** | `test_1_stress_massive_batch_execution` | 114.756ms[cite: 28] | Massive batch execution of 10 million chunks (320M states) |
-| **Stress & Parallel** | `test_4_stress_branchless_replacement_throughput` | 307.5112ms[cite: 28] | Branchless state replacement throughput over 1M loops |
+| Test / Benchmark Case | Category | Measured Time | Workload / Scope | Status |
+| :--- | :--- | :--- | :--- | :--- |
+| `test_quat_arithmetic` | Arithmetic | `100ns` | Modular `add` & `sub` (`mod 4`) operations | `ok` |
+| `test_quat_double_chunk_invert` | Block / Bitwise | `100ns` | 128-bit `QuatDoubleChunk` (64 states) invert | `ok` |
+| `test_ffi_null_pointer_safety` | FFI Safety | `200ns` | Null pointer checks on FFI stage add & execute | `ok` |
+| `test_quat_chunk_count_and_invert` | Block / SWAR | `200ns` | `count_state` and `invert` on `QuatChunk` | `ok` |
+| `test_quat_chunk_get_set_state` | Block / Indexing | `800ns` | Bounds checks & `get_state` / `set_state` on `QuatChunk` | `ok` |
+| `test_quat_lookup_stage` | Stage / LUT | `2.6µs` | `QuatLookupStage` state mapping | `ok` |
+| `test_6_boundary_empty_slice` | Boundary | `4.2µs` | Empty slice on `execute_smart` & `execute_batch_parallel` | `ok` |
+| `test_pipeline_sequential_execution` | Pipeline | `5.2µs` | Sequential `QuatInvertStage` + `QuatXorMaskStage` | `ok` |
+| `test_10_static_pipeline_zero_cost_fusion` | Static Pipeline | `7.7µs` | Compile-time fused `StaticPipeline` execution | `ok` |
+| `test_ffi_lifecycle_and_execution` | FFI | `20.1µs` | Create, add stages, execute 100 `u64` chunks, free | `ok` |
+| `test_simd_engine_with_timing` | SIMD / Batch | `57.2µs` | `SimdEngine::invert_portable` over `10,000` chunks | `ok` |
+| `test_stage_process_batch_with_timing` | Batch Stage | `367.3µs` | `process_batch` across 3 stages on `10,000` chunks | `ok` |
+| `test_quat_matrix_with_timing` | Matrix | `485µs` | `100x100` `QuatMatrix` allocation, `set`, and `transpose` | `ok` |
+| `test_pipeline_parallel_smart_execution` | Parallel Pipeline | `807µs` | `execute_smart` over `10,000` chunks | `ok` |
+| `test_generic_block_and_telemetry_pipeline_with_timing` | Generic & Telemetry | `964µs` | `GenericQuatPipeline` + `execute_smart_with_telemetry` | `ok` |
+| `test_quat_matrix_multiplication_with_timing` | Matrix Algebra | `3.8817ms` | `32x32` `mul_min_max` + `mul_modular` + error checks | `ok` |
+| `test_8_stress_ffi_rapid_creation_destruction` | Stress / FFI | `6.4843ms` | `10,000` create/add-stage/free FFI cycles | `ok` |
+| `test_5_boundary_single_element_parallel_fallback` | Boundary / Parallel | `8.9076ms` | Single-element slice with `num_threads: 16` | `ok` |
+| `test_quat_truth_table_with_timing` | Truth Table | `9.4372ms` | `1,000,000` `QuatTruthTable::evaluate` calls | `ok` |
+| `test_2_stress_thread_race_inspect_stage` | Stress / Concurrency | `10.7275ms` | Atomic `QuatInspectStage` across `100,000` chunks | `ok` |
+| `test_3_stress_deep_pipeline_chaining` | Stress / Pipeline | `13.078ms` | `100` chained XOR stages over `10,000` chunks | `ok` |
+| `test_extended_quat_logic_with_timing` | Logic | `14.4251ms` | `1,000,000` `min`, `max`, and `negate` iterations | `ok` |
+| `test_9_stress_ffi_huge_array_pass` | Stress / FFI | `14.8513ms` | `2,000,000` `u64` elements via `qpipeline_execute_smart` | `ok` |
+| `test_extended_multivalued_logic_and_from_fn_with_timing` | Multivalued Logic | `32.9382ms` | `1,000,000` Łukasiewicz, Gödel, consensus & `from_fn` | `ok` |
+| `test_7_stress_lazy_stream_processing` | Stress / Streaming | `66.691ms` | `1,000,000` chunks via `process_stream` iterator | `ok` |
+| `test_1_stress_massive_batch_execution` | Stress / Batch | `120.0219ms` | `10,000,000` chunks through invert + XOR pipeline | `ok` |
+| `test_4_stress_branchless_replacement_throughput` | Stress / Branchless | `335.7845ms` | `1,000,000` `replace_state_branchless` iterations | `ok` |
 
 ---
 
@@ -164,7 +172,7 @@ Add `qpipeline` to your `Cargo.toml`:
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# Add crate dependencies here
+qpipeline = "1.3.0"
 ```
 
 Build the static and dynamic libraries (`.dll` on Windows, `.so` on Linux, `.dylib` on macOS):
@@ -253,6 +261,69 @@ fn main() {
 }
 ```
 
+### Multivalued Logic, Truth Tables & Matrix Algebra
+
+```rust
+use qpipeline::chunk::QuatState;
+use qpipeline::logic::{QuatLogicOps, QuatMatrix, QuatTruthTable};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let a = QuatState::Q2;
+    let b = QuatState::Q1;
+
+    let luk = a.imply_lukasiewicz(b);
+    let godel = a.imply_godel(b);
+    let cons = a.consensus(b);
+    println!("Luk: {luk:?}, Godel: {godel:?}, Consensus: {cons:?}");
+
+    let table = QuatTruthTable::from_fn(|x, y| x.imply_lukasiewicz(y));
+    println!("Table[Q0][Q1] = {:?}", table.evaluate(QuatState::Q0, QuatState::Q1));
+
+    let m1 = QuatMatrix::new(2, 2, QuatState::Q2);
+    let m2 = QuatMatrix::new(2, 2, QuatState::Q1);
+    let product = m1.mul_min_max(&m2)?;
+    println!("Matrix[0][0] = {:?}", product.get(0, 0));
+
+    Ok(())
+}
+```
+
+### Generic Block Pipeline & Execution Telemetry
+
+```rust
+use qpipeline::builder::{GenericQuatPipeline, GenericStage, PipelineTelemetry, QuatPipeline};
+use qpipeline::chunk::{QuatBlock, QuatChunk, QuatDoubleChunk};
+use qpipeline::error::PipelineError;
+use qpipeline::stage::{QuatInvertStage, QuatStage};
+
+struct GenericInvert;
+impl<B: QuatBlock> GenericStage<B> for GenericInvert {
+    fn process(&self, block: B) -> Result<B, PipelineError> {
+        Ok(block.invert())
+    }
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut double_chunks = vec![QuatDoubleChunk::new(0); 1_000];
+    let generic_pipe = GenericQuatPipeline::<QuatDoubleChunk>::new().add_stage(GenericInvert);
+    generic_pipe.execute_slice(&mut double_chunks)?;
+
+    let mut pipeline = QuatPipeline::new();
+    pipeline.push_stage(QuatInvertStage);
+
+    let mut chunks = vec![QuatChunk::new(0); 10_000];
+    QuatInvertStage.process_batch(&mut chunks)?;
+
+    let telemetry: PipelineTelemetry = pipeline.execute_smart_with_telemetry(&mut chunks, 2048)?;
+    println!(
+        "Chunks: {}, Threads: {}, Elapsed ns: {}",
+        telemetry.processed_chunks, telemetry.threads_used, telemetry.elapsed_nanos
+    );
+
+    Ok(())
+}
+```
+
 ---
 
 ## Foreign Language Support (FFI)
@@ -294,6 +365,47 @@ QuatFFIStatus qpipeline_execute_smart(QuatPipelineHandle ptr, uint64_t* chunks_p
 #endif
 
 #endif // QPIPELINE_H
+```
+
+Example C usage:
+
+```c
+#include "qpipeline.h"
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void) {
+    QuatPipelineHandle pipeline = qpipeline_create();
+    if (!pipeline) {
+        fprintf(stderr, "Failed to create pipeline\n");
+        return 1;
+    }
+
+    if (qpipeline_add_invert_stage(pipeline) != QUAT_OK ||
+        qpipeline_add_xor_stage(pipeline, 0xFF00FF00FF00FF00ULL) != QUAT_OK) {
+        fprintf(stderr, "Failed to add pipeline stages\n");
+        qpipeline_free(pipeline);
+        return 1;
+    }
+
+    const size_t len = 10000;
+    uint64_t *data = (uint64_t *)calloc(len, sizeof(uint64_t));
+    if (!data) {
+        qpipeline_free(pipeline);
+        return 1;
+    }
+
+    QuatFFIStatus status = qpipeline_execute_smart(pipeline, data, len);
+    if (status == QUAT_OK) {
+        printf("Data processed successfully via C!\n");
+    } else {
+        fprintf(stderr, "Pipeline execution failed with status: %d\n", (int)status);
+    }
+
+    free(data);
+    qpipeline_free(pipeline);
+    return (status == QUAT_OK) ? 0 : 1;
+}
 ```
 
 Example C++ usage:

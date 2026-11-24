@@ -194,3 +194,67 @@ impl QuatDoubleChunk {
         self.0
     }
 }
+
+pub trait QuatBlock: Copy + Clone + Send + Sync + 'static {
+    const CAPACITY: usize;
+
+    fn invert(self) -> Self;
+    fn get_state(&self, index: usize) -> Result<QuatState, PipelineError>;
+    fn set_state(&mut self, index: usize, state: QuatState) -> Result<(), PipelineError>;
+}
+
+impl QuatBlock for QuatChunk {
+    const CAPACITY: usize = 32;
+
+    #[inline(always)]
+    fn invert(self) -> Self {
+        QuatChunk::invert(self)
+    }
+
+    #[inline(always)]
+    fn get_state(&self, index: usize) -> Result<QuatState, PipelineError> {
+        QuatChunk::get_state(self, index)
+    }
+
+    #[inline(always)]
+    fn set_state(&mut self, index: usize, state: QuatState) -> Result<(), PipelineError> {
+        QuatChunk::set_state(self, index, state)
+    }
+}
+
+impl QuatBlock for QuatDoubleChunk {
+    const CAPACITY: usize = 64;
+
+    #[inline(always)]
+    fn invert(self) -> Self {
+        QuatDoubleChunk::invert(self)
+    }
+
+    #[inline(always)]
+    fn get_state(&self, index: usize) -> Result<QuatState, PipelineError> {
+        if index >= Self::CAPACITY {
+            return Err(PipelineError::IndexOutOfBounds {
+                index,
+                max: Self::CAPACITY - 1,
+            });
+        }
+        let shift = index * 2;
+        let bits = ((self.0 >> shift) & 0b11) as u8;
+        Ok(QuatState::from(bits))
+    }
+
+    #[inline(always)]
+    fn set_state(&mut self, index: usize, state: QuatState) -> Result<(), PipelineError> {
+        if index >= Self::CAPACITY {
+            return Err(PipelineError::IndexOutOfBounds {
+                index,
+                max: Self::CAPACITY - 1,
+            });
+        }
+        let shift = index * 2;
+        let mask: u128 = !(0b11u128 << shift);
+        let val: u128 = (state as u128) << shift;
+        self.0 = (self.0 & mask) | val;
+        Ok(())
+    }
+}

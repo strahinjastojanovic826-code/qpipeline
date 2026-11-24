@@ -396,4 +396,127 @@ fn test_simd_engine_with_timing() {
     assert_eq!(chunks[0].raw(), !0x01010101);
 }
 
+#[test]
+    fn test_extended_multivalued_logic_and_from_fn_with_timing() {
+        use crate::logic::{QuatLogicOps, QuatTruthTable};
+
+        let table = QuatTruthTable::from_fn(|a, b| a.imply_lukasiewicz(b));
+        assert_eq!(table.evaluate(QuatState::Q0, QuatState::Q1), QuatState::Q3);
+        assert_eq!(QuatState::Q2.imply_godel(QuatState::Q1), QuatState::Q1);
+        assert_eq!(QuatState::Q1.imply_godel(QuatState::Q3), QuatState::Q3);
+
+        let start = Instant::now();
+        let mut acc = QuatState::Q0;
+        for _ in 0..1_000_000 {
+            let l = QuatState::Q1.imply_lukasiewicz(QuatState::Q2);
+            let g = QuatState::Q2.imply_godel(QuatState::Q1);
+            let c = QuatState::Q1.consensus(QuatState::Q2);
+            acc = l.min(g).max(c);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "[BENCHMARK] 1,000,000 multivalued logic iterations took: {:?}",
+            elapsed
+        );
+        assert!(matches!(
+            acc,
+            QuatState::Q0 | QuatState::Q1 | QuatState::Q2 | QuatState::Q3
+        ));
+    }
+
+    #[test]
+    fn test_stage_process_batch_with_timing() {
+        use crate::stage::{QuatInvertStage, QuatLookupStage, QuatStage, QuatXorMaskStage};
+
+        let invert_stage = QuatInvertStage;
+        let xor_stage = QuatXorMaskStage {
+            mask: 0x0F0F_0F0F_0F0F_0F0F,
+        };
+        let lookup_stage = QuatLookupStage::new([
+            QuatState::Q3,
+            QuatState::Q2,
+            QuatState::Q1,
+            QuatState::Q0,
+        ]);
+
+        let mut chunks: Vec<QuatChunk> = vec![QuatChunk::new(0); 10_000];
+
+        let start = Instant::now();
+        invert_stage.process_batch(&mut chunks).unwrap();
+        xor_stage.process_batch(&mut chunks).unwrap();
+        lookup_stage.process_batch(&mut chunks).unwrap();
+        let elapsed = start.elapsed();
+
+        println!(
+            "[BENCHMARK] process_batch across 3 stages on 10,000 chunks took: {:?}",
+            elapsed
+        );
+        assert_eq!(chunks.len(), 10_000);
+    }
+
+    #[test]
+    fn test_quat_matrix_multiplication_with_timing() {
+        use crate::logic::QuatMatrix;
+
+        let mut a = QuatMatrix::new(32, 32, QuatState::Q1);
+        let mut b = QuatMatrix::new(32, 32, QuatState::Q2);
+        a.set(0, 0, QuatState::Q3);
+        b.set(0, 0, QuatState::Q3);
+
+        let start = Instant::now();
+        let minmax_res = a.mul_min_max(&b).unwrap();
+        let mod_res = a.mul_modular(&b).unwrap();
+        let elapsed = start.elapsed();
+
+        println!(
+            "[BENCHMARK] QuatMatrix 32x32 mul_min_max + mul_modular took: {:?}",
+            elapsed
+        );
+        assert_eq!(minmax_res.get(0, 0), Some(QuatState::Q3));
+        assert!(mod_res.get(0, 0).is_some());
+
+        let bad_a = QuatMatrix::new(2, 3, QuatState::Q0);
+        let bad_b = QuatMatrix::new(4, 2, QuatState::Q0);
+        assert!(bad_a.mul_min_max(&bad_b).is_err());
+        assert!(bad_a.mul_modular(&bad_b).is_err());
+    }
+
+    #[test]
+    fn test_generic_block_and_telemetry_pipeline_with_timing() {
+        use crate::builder::{GenericQuatPipeline, GenericStage, PipelineTelemetry, QuatPipeline};
+        use crate::chunk::QuatBlock;
+        use crate::error::PipelineError;
+        use crate::stage::QuatInvertStage;
+
+        struct GenericInvert;
+        impl<B: QuatBlock> GenericStage<B> for GenericInvert {
+            fn process(&self, block: B) -> Result<B, PipelineError> {
+                Ok(block.invert())
+            }
+        }
+
+        let mut gen_pipe = GenericQuatPipeline::<QuatDoubleChunk>::new();
+        gen_pipe = gen_pipe.add_stage(GenericInvert);
+
+        let mut d_chunks = vec![QuatDoubleChunk::new(0); 5_000];
+        let mut pipe = QuatPipeline::new();
+        pipe.push_stage(QuatInvertStage);
+        let mut chunks = vec![QuatChunk::new(0); 10_000];
+
+        let start = Instant::now();
+        gen_pipe.execute_slice(&mut d_chunks).unwrap();
+        let telemetry: PipelineTelemetry = pipe
+            .execute_smart_with_telemetry(&mut chunks, 2048)
+            .unwrap();
+        let elapsed = start.elapsed();
+
+        println!(
+            "[BENCHMARK] GenericQuatPipeline + telemetry execution took: {:?}",
+            elapsed
+        );
+        assert_eq!(d_chunks[0].raw(), !0u128);
+        assert_eq!(telemetry.processed_chunks, 10_000);
+        assert!(telemetry.threads_used >= 1);
+    }
+
 }
